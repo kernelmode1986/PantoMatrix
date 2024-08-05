@@ -216,44 +216,55 @@ class CustomTrainer(train.BaseTrainer):
             in_id = loaded_data['tar_id'], in_motion = loaded_data['latent_face_top'],#no codebook 1.latent_face_encoder
             use_attentions = True)
         
-        
-        g_loss_final = 0
-        
         tar_face = loaded_data['tar_pose_face']
         rec_face = self.vq_model_face.decoder(net_out_val['latent_face_rec']) #[32,64,256]
+        g_loss_final = 0
         
+        #1.rec loss
+        loss_rec = self.reclatent_loss(rec_face, tar_face) * self.args.rec_weight
+        self.tracker.update_meter("rec", "train", loss_rec.item())
+        g_loss_final += loss_rec
+        velocity_loss =  self.vel_loss(rec_face[:, 1:] - rec_face[:, :-1], tar_face[:, 1:] - tar_face[:, :-1]) * self.args.rec_weight
+        acceleration_loss =  self.vel_loss(rec_face[:, 2:] + rec_face[:, :-2] - 2 * rec_face[:, 1:-1], tar_face[:, 2:] + tar_face[:, :-2] - 2 * tar_face[:, 1:-1]) * self.args.rec_weight
+        self.tracker.update_meter("vel", "train", velocity_loss.item())
+        self.tracker.update_meter("acc", "train", acceleration_loss.item())
+        g_loss_final += velocity_loss 
+        g_loss_final += acceleration_loss
+        
+        
+    
+        
+        # jaw open 6d rec loss
+        # loss_rec = self.rec_loss(rec_pose, tar_pose) * self.args.rec_weight
+        # self.tracker.update_meter("rec", "train", loss_rec.item())
+        # g_loss_final += loss_rec
+        # # jaw open 6d vel and acc loss
+        # velocity_loss =  self.vel_loss(rec_pose[:, 1:] - rec_pose[:, :-1], tar_pose[:, 1:] - tar_pose[:, :-1]) * self.args.rec_weight
+        # acceleration_loss =  self.vel_loss(rec_pose[:, 2:] + rec_pose[:, :-2] - 2 * rec_pose[:, 1:-1], tar_pose[:, 2:] + tar_pose[:, :-2] - 2 * tar_pose[:, 1:-1]) * self.args.rec_weight
+        # self.tracker.update_meter("vel", "train", velocity_loss.item())
+        # self.tracker.update_meter("acc", "train", acceleration_loss.item())
+        # g_loss_final += velocity_loss 
+        # g_loss_final += acceleration_loss
+        
+
+        # loss_face = self.reclatent_loss(rec_exps, tar_exps) * self.args.rec_weight
+        # self.tracker.update_meter("face", "train", loss_face.item())
+        # g_loss_final += loss_face
+        # # face parameter l1 vel and acc loss
+        # face_velocity_loss =  self.vel_loss(rec_exps[:, 1:] - rec_exps[:, :-1], tar_exps[:, 1:] - tar_exps[:, :-1]) * self.args.rec_weight
+        # face_acceleration_loss =  self.vel_loss(rec_exps[:, 2:] + rec_exps[:, :-2] - 2 * rec_exps[:, 1:-1], tar_exps[:, 2:] + tar_exps[:, :-2] - 2 * tar_exps[:, 1:-1]) * self.args.rec_weight
+        # self.tracker.update_meter("face_vel", "train", face_velocity_loss.item())
+        # self.tracker.update_meter("face_acc", "train", face_acceleration_loss.item())
+        # g_loss_final += face_velocity_loss
+        # g_loss_final += face_acceleration_loss
+        
+        # 2.vertices loss
         joints = 1   #如果是pose，修改joints，使用上面的latent_in即可 
         j = 1        
         rec_pose = rc.rotation_6d_to_matrix(rec_face[:, :, :joints*6].reshape(bs, n, joints, 6))
         tar_pose = rc.rotation_6d_to_matrix(tar_face[:, :, :joints*6].reshape(bs, n, joints, 6))    
         rec_exps = rec_face[:, :, joints*6:]            
         tar_exps = tar_face[:, :, joints*6:]
-        
-        # jaw open 6d rec loss
-        loss_rec = self.rec_loss(rec_pose, tar_pose) * self.args.rec_weight
-        self.tracker.update_meter("rec", "train", loss_rec.item())
-        g_loss_final += loss_rec
-        # jaw open 6d vel and acc loss
-        velocity_loss =  self.vel_loss(rec_pose[:, 1:] - rec_pose[:, :-1], tar_pose[:, 1:] - tar_pose[:, :-1]) * self.args.rec_weight
-        acceleration_loss =  self.vel_loss(rec_pose[:, 2:] + rec_pose[:, :-2] - 2 * rec_pose[:, 1:-1], tar_pose[:, 2:] + tar_pose[:, :-2] - 2 * tar_pose[:, 1:-1]) * self.args.rec_weight
-        self.tracker.update_meter("vel", "train", velocity_loss.item())
-        self.tracker.update_meter("acc", "train", acceleration_loss.item())
-        g_loss_final += velocity_loss 
-        g_loss_final += acceleration_loss
-        
-
-        loss_face = self.reclatent_loss(rec_exps, tar_exps) * self.args.rec_weight
-        self.tracker.update_meter("face", "train", loss_face.item())
-        g_loss_final += loss_face
-        # face parameter l1 vel and acc loss
-        face_velocity_loss =  self.vel_loss(rec_exps[:, 1:] - rec_exps[:, :-1], tar_exps[:, 1:] - tar_exps[:, :-1]) * self.args.rec_weight
-        face_acceleration_loss =  self.vel_loss(rec_exps[:, 2:] + rec_exps[:, :-2] - 2 * rec_exps[:, 1:-1], tar_exps[:, 2:] + tar_exps[:, :-2] - 2 * tar_exps[:, 1:-1]) * self.args.rec_weight
-        self.tracker.update_meter("face_vel", "train", face_velocity_loss.item())
-        self.tracker.update_meter("face_acc", "train", face_acceleration_loss.item())
-        g_loss_final += face_velocity_loss
-        g_loss_final += face_acceleration_loss
-        
-            # vertices loss
         if self.args.rec_ver_weight > 0:
             tar_trans = loaded_data['tar_trans']
             tar_beta = loaded_data['tar_beta']
