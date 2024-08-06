@@ -1,4 +1,5 @@
 debug: False
+use_codebook: True
 is_train: True
 ddp: False
 stat: ts

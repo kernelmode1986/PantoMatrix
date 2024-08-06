@@ -211,20 +211,16 @@ class CustomTrainer(train.BaseTrainer):
         mask_val = torch.ones(bs, n, self.args.pose_dims+3+4).float().cuda()
         mask_val[:, :self.args.pre_frames, :] = 0.0
         
+        in_motion = loaded_data['latent_face_top'] if self.args.use_codebook else loaded_data['latent_face_encoder']
         net_out_val  = self.model(
-            loaded_data['in_audio'], loaded_data['in_word'], mask=mask_val, mode='train',
-            in_id = loaded_data['tar_id'], in_motion = loaded_data['latent_face_top'],#no codebook 1.latent_face_encoder
-            use_attentions = True)
+            in_audio=loaded_data['in_audio'],in_word=None, mode='train', in_motion = in_motion,#no codebook 1.latent_face_encoder
+            use_attentions = False)
         
-        tar_face = loaded_data['tar_pose_face']
-        rec_face = self.vq_model_face.decoder(net_out_val['latent_face_rec']) #[32,64,256]
         g_loss_final = 0
         
-        
-        tar_face_latent = loaded_data['latent_face_top']
-        rec_face_latent = net_out_val['latent_face_rec']
-        
         #1.rec loss
+        tar_face_latent = in_motion
+        rec_face_latent = net_out_val['latent_face_rec']
         
         loss_rec = self.reclatent_loss(rec_face_latent, tar_face_latent) * self.args.rec_weight
         self.tracker.update_meter("rec", "train", loss_rec.item())
@@ -272,7 +268,12 @@ class CustomTrainer(train.BaseTrainer):
         # g_loss_final += face_velocity_loss
         # g_loss_final += face_acceleration_loss
         
-        # 2.vertices loss
+        # 2.vertices loss        
+        tar_face = loaded_data['tar_pose_face']#[32,64,106]
+        if self.args.use_codebook:
+            _, rec_face_latent, _, _ = self.vq_model_face.quantizer(rec_face_latent)
+        rec_face = self.vq_model_face.decoder(rec_face_latent) #[32,64,106]
+        
         joints = 1   #如果是pose，修改joints，使用上面的latent_in即可 
         j = 1        
         rec_pose = rc.rotation_6d_to_matrix(rec_face[:, :, :joints*6].reshape(bs, n, joints, 6))
@@ -383,8 +384,9 @@ class CustomTrainer(train.BaseTrainer):
     def _g_test(self, loaded_data, all_in_one=True):
         mode = 'test'    
         bs, n, j = loaded_data["latent_face_top"].shape[0], loaded_data["latent_face_top"].shape[1], 1 
-        tar_pose_face = loaded_data["tar_pose_face"]
-        latent_face = loaded_data["latent_face_top"]
+        tar_face = loaded_data["tar_pose_face"]
+        latent_face = loaded_data['latent_face_top'] if self.args.use_codebook else loaded_data['latent_face_encoder']
+        
         tar_beta = loaded_data["tar_beta"]
         in_word = loaded_data["in_word"]
         tar_exps = loaded_data["tar_exps"]
@@ -426,7 +428,7 @@ class CustomTrainer(train.BaseTrainer):
         round_l = self.args.pose_length - self.args.pre_frames
         
         if remain != 0:
-            tar_pose_face = tar_pose_face[:, :-remain, :]
+            tar_face = tar_face[:, :-remain, :]
             latent_face = latent_face[:, :-remain, :]      
             tar_beta = tar_beta[:, :-remain, :]
             tar_trans = tar_trans[:, :-remain, :]
@@ -451,10 +453,9 @@ class CustomTrainer(train.BaseTrainer):
             
             net_out_val = self.model(
                 in_audio = in_audio_tmp,
-                in_word=in_word_tmp,
-                mask=None, mode='test',
+                in_word=None, 
+                mode='test',
                 in_motion = latent_all_tmp,
-                in_id = in_id_tmp,
                 use_attentions=True,)
             
             latent_face_rec = net_out_val['latent_face_rec']
@@ -468,14 +469,16 @@ class CustomTrainer(train.BaseTrainer):
             latent_last = latent_face_rec
         latent_face_list.append(latent_last[:, -self.args.pre_frames:, :])
         latent_face_all = torch.cat(latent_face_list, dim=1)
-
-        _, rec_index_face, _, _ = self.vq_model_face.quantizer(latent_face_all)#no codebook 2. # this line.
-        rec_pose_face = self.vq_model_face.decoder(rec_index_face)
-
-        rec_pose = rc.rotation_6d_to_matrix(rec_pose_face[:, :, :joints * 6].reshape(bs, n, joints, 6))
-        tar_pose = rc.rotation_6d_to_matrix(tar_pose_face[:, :, :joints * 6].reshape(bs, n, joints, 6))
-        rec_exps = rec_pose_face[:, :, joints * 6:]
-        tar_exps = tar_pose_face[:, :, joints * 6:]
+        if self.args.use_codebook:
+            _, rec_latent_face, _, _ = self.vq_model_face.quantizer(latent_face_all)#no codebook 4. # this line.
+        else:
+            rec_latent_face = latent_face_all
+            
+        rec_face = self.vq_model_face.decoder(rec_latent_face)
+        rec_pose = rc.rotation_6d_to_matrix(rec_face[:, :, :joints * 6].reshape(bs, n, joints, 6))
+        tar_pose = rc.rotation_6d_to_matrix(tar_face[:, :, :joints * 6].reshape(bs, n, joints, 6))
+        rec_exps = rec_face[:, :, joints * 6:]
+        tar_exps = tar_face[:, :, joints * 6:]
 
         return {
             'rec_pose': rec_pose,

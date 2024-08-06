@@ -220,12 +220,14 @@ class ldm_transformer(nn.Module):
     def _reset_parameters(self):
         nn.init.normal_(self.mask_embeddings, 0, self.args.hidden_size ** -0.5)
     
-    def forward(self, in_audio=None, in_word=None, mask=None, mode=None, in_motion=None, use_attentions=True, use_word=True, in_id = None):
-        in_word_face = self.text_pre_encoder_face(in_word)
-        in_word_face = self.text_encoder_face(in_word_face)
-        in_word_body = self.text_pre_encoder_body(in_word)
-        in_word_body = self.text_encoder_body(in_word_body)
-        bs, t, c = in_word_face.shape
+    def forward(self, in_audio=None, in_word=None, mode=None, in_motion=None, use_attentions=True):
+        bs, t, c = in_motion.shape
+        if in_word:
+            in_word_face = self.text_pre_encoder_face(in_word)
+            in_word_face = self.text_encoder_face(in_word_face)
+            in_word_body = self.text_pre_encoder_body(in_word)
+            in_word_body = self.text_encoder_body(in_word_body)
+        
         in_audio_face = self.audio_pre_encoder_face(in_audio)
         in_audio_body = self.audio_pre_encoder_body(in_audio)
         if in_audio_face.shape[1] != in_motion.shape[1]:

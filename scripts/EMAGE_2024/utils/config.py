@@ -273,6 +273,8 @@ def parse_args():
     parser.add('--emb_trans_dec', default= False, type=bool)
     parser.add('--cond_mode',action='append', default= ['text', 'audio'], type=list)
     parser.add('--modeltype', default= 'transformer', type=str)
+    
+    parser.add('--use_codebook', default= True, type=bool)
   
     
     args = parser.parse_args()
